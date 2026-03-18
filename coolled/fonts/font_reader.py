@@ -10,7 +10,7 @@ Font-Format:
   - Direkter Zugriff über Datei-Seek auf (char_code × bytes_per_char)
 """
 
-import os
+import sys
 from pathlib import Path
 
 from coolled.protocol.constants import (
@@ -18,8 +18,11 @@ from coolled.protocol.constants import (
     FONT_UNICODE16_BYTES_PER_CHAR,
 )
 
-# Standard-Pfad zu den Font-Dateien im Decompile-Verzeichnis
-_DEFAULT_ASSETS_DIR = Path(__file__).parent.parent.parent / "coolled1248decomp" / "resources" / "assets"
+# Standard-Pfad zu den Font-Dateien (PyInstaller-kompatibel)
+if getattr(sys, '_MEIPASS', None):
+    _DEFAULT_ASSETS_DIR = Path(sys._MEIPASS) / "coolled" / "fonts" / "data"
+else:
+    _DEFAULT_ASSETS_DIR = Path(__file__).parent / "data"
 
 
 class FontReader:
