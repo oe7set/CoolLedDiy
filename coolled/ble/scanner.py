@@ -13,6 +13,7 @@ from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
 from coolled.protocol.constants import DEVICE_NAMES
+from coolled.protocol.device_type import DeviceFamily, detect_device_family
 from coolled.protocol.scan_record import ScanRecordInfo, parse_scan_record
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ class DiscoveredDevice:
     name: str                      # Gerätename
     address: str                   # MAC-Adresse
     rssi: int                      # Signalstärke
+    device_family: DeviceFamily    # Erkannte Gerätefamilie für Protokoll-Routing
     scan_info: ScanRecordInfo | None  # Geparste Scan-Record-Daten (falls verfügbar)
     raw_manufacturer_data: dict    # Rohe Manufacturer-Data aus Advertisement
 
@@ -64,6 +66,7 @@ class BleScanner:
             name=name,
             address=device.address,
             rssi=adv_data.rssi,
+            device_family=detect_device_family(name),
             scan_info=scan_info,
             raw_manufacturer_data=raw_mfr,
         )

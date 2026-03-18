@@ -7,6 +7,7 @@ Enthält:
 - Zentrale Verdrahtung aller Signals zwischen GUI und BLE-Layer
 """
 
+import asyncio
 import logging
 
 from PySide6.QtWidgets import (
@@ -41,6 +42,19 @@ from coolled.protocol.commands import (
     cmd_switch,
     cmd_sync_time,
 )
+from coolled.protocol.commands_advanced import (
+    build_program_data,
+    build_program_transfer,
+    cmd_brightness_m,
+    cmd_switch_m,
+)
+from coolled.protocol.constants import BEGIN_TRANSFER_DELAY_S
+from coolled.protocol.device_type import (
+    DeviceFamily,
+    detect_device_family,
+    uses_advanced_protocol,
+    uses_begin_transfer,
+)
 from coolled.protocol.text_encoding import encode_text_packets
 
 logger = logging.getLogger(__name__)
@@ -58,6 +72,9 @@ class MainWindow(QMainWindow):
         self._connection = BleConnection(self)
         self._transport = BleTransport(self._connection, self)
         self._font_reader = FontReader()
+
+        # Gerätefamilie (wird beim Connect gesetzt)
+        self._device_family: DeviceFamily = DeviceFamily.LIGHT_1248
 
         # Paket-Log (zentrale Datenquelle für Debug-Tab)
         self._packet_log = PacketLog(self)
@@ -139,6 +156,9 @@ class MainWindow(QMainWindow):
     async def _on_connect_requested(self, device: DiscoveredDevice) -> None:
         """Verbindet sich mit dem ausgewählten Gerät."""
         self._connection_label.setText(f"Verbinde mit {device.name}...")
+        # Gerätefamilie aus Scanner-Ergebnis übernehmen
+        self._device_family = device.device_family
+        logger.info(f"Gerätefamilie: {self._device_family.value}")
         success = await self._connection.connect(device.ble_device)
         if not success:
             self._connection_label.setText("Verbindung fehlgeschlagen")
@@ -161,26 +181,43 @@ class MainWindow(QMainWindow):
 
     @asyncSlot(str, bool)
     async def _on_send_text(self, text: str, use_font_16: bool) -> None:
-        """Sendet Text an das Panel."""
+        """Sendet Text an das Panel.
+
+        Protokoll-Routing nach Gerätefamilie:
+        - Light1248: Direkt Text-Pakete senden (kein begin_transfer)
+        - Light536: begin_transfer + 50ms Delay + Text-Pakete
+        - M/U/UX: Programm-Format (Start-Paket + LZSS-komprimierte Daten-Pakete)
+        """
         if not self._connection.is_connected:
             self._status_bar.showMessage("Nicht verbunden!", 3000)
             return
 
         self._status_bar.showMessage("Sende Text...")
         try:
-            # Mode und Speed zuerst setzen, dann Transfer starten
-            # (Android-App sendet Mode/Speed separat, nicht zwischen begin und data)
+            # Mode und Speed zuerst setzen
             mode = self._text_tab.selected_mode
             speed = self._text_tab.selected_speed
             await self._transport.send_packet(cmd_mode(mode))
             await self._transport.send_packet(cmd_speed(speed))
 
-            # Begin Transfer
-            await self._transport.send_packet(cmd_begin_transfer())
+            if uses_advanced_protocol(self._device_family):
+                # M/U/UX: Programm-Format mit LZSS + CRC
+                text_packets_data = encode_text_packets(text, self._font_reader, use_font_16)
+                # Rohe Text-Daten für Programm-Wrapper extrahieren
+                content_data = b"".join(text_packets_data)
+                program_data = build_program_data(content_data)
+                start_pkt, data_pkts = build_program_transfer(program_data)
+                await self._transport.send_packet(start_pkt)
+                success = await self._transport.send_packets(data_pkts)
+            else:
+                # Light536: begin_transfer + 50ms Delay
+                if uses_begin_transfer(self._device_family):
+                    await self._transport.send_packet(cmd_begin_transfer())
+                    await asyncio.sleep(BEGIN_TRANSFER_DELAY_S)
 
-            # Text-Pakete kodieren und senden
-            packets = encode_text_packets(text, self._font_reader, use_font_16)
-            success = await self._transport.send_packets(packets)
+                # Light1248/536: Text-Pakete direkt senden
+                packets = encode_text_packets(text, self._font_reader, use_font_16)
+                success = await self._transport.send_packets(packets)
 
             if success:
                 self._status_bar.showMessage("Text gesendet!", 3000)
@@ -192,17 +229,34 @@ class MainWindow(QMainWindow):
 
     @asyncSlot(bytes)
     async def _on_send_image(self, bitmap: bytes) -> None:
-        """Sendet Bitmap-Daten an das Panel (Bild oder Zeichnung)."""
+        """Sendet Bitmap-Daten an das Panel (Bild oder Zeichnung).
+
+        Protokoll-Routing:
+        - Light1248: Direkt Draw-Pakete (kein begin_transfer)
+        - Light536: begin_transfer + 50ms Delay + Draw-Pakete
+        - M/U/UX: Programm-Format
+        """
         if not self._connection.is_connected:
             self._status_bar.showMessage("Nicht verbunden!", 3000)
             return
 
         self._status_bar.showMessage("Sende Bild...")
         try:
-            await self._transport.send_packet(cmd_begin_transfer())
-            # Chunk-Protokoll wie Text/Animation (getIconDataStrings)
-            packets = cmd_draw_packets(bitmap)
-            success = await self._transport.send_packets(packets)
+            if uses_advanced_protocol(self._device_family):
+                # M/U/UX: Programm-Format
+                program_data = build_program_data(bitmap)
+                start_pkt, data_pkts = build_program_transfer(program_data)
+                await self._transport.send_packet(start_pkt)
+                success = await self._transport.send_packets(data_pkts)
+            else:
+                # Light536: begin_transfer + Delay
+                if uses_begin_transfer(self._device_family):
+                    await self._transport.send_packet(cmd_begin_transfer())
+                    await asyncio.sleep(BEGIN_TRANSFER_DELAY_S)
+
+                # Light1248/536: Draw-Pakete direkt
+                packets = cmd_draw_packets(bitmap)
+                success = await self._transport.send_packets(packets)
 
             if success:
                 self._status_bar.showMessage("Bild gesendet!", 3000)
@@ -214,16 +268,33 @@ class MainWindow(QMainWindow):
 
     @asyncSlot(list, int)
     async def _on_send_animation(self, frames: list, speed: int) -> None:
-        """Sendet eine Multi-Frame-Animation an das Panel."""
+        """Sendet eine Multi-Frame-Animation an das Panel.
+
+        Protokoll-Routing:
+        - Light1248: begin_transfer + Animation-Pakete (Animation braucht immer begin_transfer)
+        - Light536: begin_transfer + 50ms Delay + Animation-Pakete
+        - M/U/UX: Programm-Format
+        """
         if not self._connection.is_connected:
             self._status_bar.showMessage("Nicht verbunden!", 3000)
             return
 
         self._status_bar.showMessage("Sende Animation...")
         try:
-            await self._transport.send_packet(cmd_begin_transfer())
-            packets = cmd_animation_packets(frames, speed)
-            success = await self._transport.send_packets(packets)
+            if uses_advanced_protocol(self._device_family):
+                # M/U/UX: Programm-Format
+                anim_data = b"".join(cmd_animation_packets(frames, speed))
+                program_data = build_program_data(anim_data)
+                start_pkt, data_pkts = build_program_transfer(program_data)
+                await self._transport.send_packet(start_pkt)
+                success = await self._transport.send_packets(data_pkts)
+            else:
+                # Light1248/536: begin_transfer + Animation-Pakete
+                await self._transport.send_packet(cmd_begin_transfer())
+                if uses_begin_transfer(self._device_family):
+                    await asyncio.sleep(BEGIN_TRANSFER_DELAY_S)
+                packets = cmd_animation_packets(frames, speed)
+                success = await self._transport.send_packets(packets)
 
             if success:
                 self._status_bar.showMessage("Animation gesendet!", 3000)
@@ -236,12 +307,18 @@ class MainWindow(QMainWindow):
     @asyncSlot(bool)
     async def _on_switch(self, on: bool) -> None:
         if self._connection.is_connected:
-            await self._transport.send_packet(cmd_switch(on))
+            if uses_advanced_protocol(self._device_family):
+                await self._transport.send_packet(cmd_switch_m(on))
+            else:
+                await self._transport.send_packet(cmd_switch(on))
 
     @asyncSlot(int)
     async def _on_brightness(self, value: int) -> None:
         if self._connection.is_connected:
-            await self._transport.send_packet(cmd_brightness(value))
+            if uses_advanced_protocol(self._device_family):
+                await self._transport.send_packet(cmd_brightness_m(value))
+            else:
+                await self._transport.send_packet(cmd_brightness(value))
 
     @asyncSlot(int)
     async def _on_speed(self, value: int) -> None:

@@ -108,14 +108,16 @@ class BleConnection(QObject):
             await self._client.connect()
 
             # MTU-Negotiation (Ref: DeviceManager.java BLE_MTU_MAX_SIZE = 247)
+            # bleak's mtu_size gibt den negotiated MTU inkl. 3 Byte ATT-Overhead.
+            # Nutzbare Payload = MTU - 3. Bei MTU 247 → 244, gekappt auf 180.
             try:
-                # bleak unterstützt MTU-Request auf manchen Plattformen
                 mtu = self._client.mtu_size
-                if mtu and mtu >= BLE_MTU_MAX_SIZE:
-                    self._mtu = BLE_WRITE_CHAR_MAX_SIZE  # 180 Bytes
+                usable = (mtu - 3) if mtu else 0
+                if usable > BLE_WRITE_CHAR_MIN_SIZE:
+                    self._mtu = min(usable, BLE_WRITE_CHAR_MAX_SIZE)
                 else:
-                    self._mtu = BLE_WRITE_CHAR_MIN_SIZE  # 20 Bytes Fallback
-                logger.info(f"MTU: {mtu}, Write-Chunk-Size: {self._mtu}")
+                    self._mtu = BLE_WRITE_CHAR_MIN_SIZE
+                logger.info(f"MTU: {mtu}, Usable: {usable}, Write-Chunk-Size: {self._mtu}")
             except Exception:
                 self._mtu = BLE_WRITE_CHAR_MIN_SIZE
                 logger.warning("MTU-Abfrage fehlgeschlagen, verwende Fallback 20 Bytes")

@@ -48,13 +48,20 @@ CMD_DEVICE_INFO = 0x1F   # getDeviceInfo() in CoolledUXUtils.java:3934
 # CoolLEDM/UX verwenden 0x05 für Switch.
 CMD_SYNC_TIME = 0x09     # getSynchronizeTime() in CoolledUXUtils.java:4036
 
+# M/U/UX-spezifische Kommando-Bytes (aus CoolledMUtils.java:1554-1576)
+CMD_M_BRIGHTNESS = 0x04  # getSetBrightness() - statt 0x08 auf Light1248
+CMD_M_SWITCH = 0x05      # getSwitchData() - statt 0x09 auf Light1248
+CMD_M_DATA = 0x03        # Daten-Pakete im Programm-Format
+CMD_M_START = 0x02       # Start-Paket mit CRC + Gesamtlänge
+
 # Kommando-Namen für Debug-Anzeige (Dissector)
 CMD_NAMES = {
     CMD_MUSIC: "MUSIC",
-    CMD_TEXT: "TEXT",
-    CMD_DRAW: "DRAW",
+    CMD_TEXT: "TEXT/M_START",
+    CMD_DRAW: "DRAW/M_DATA",
     CMD_ANIMATION: "ANIMATION",
-    CMD_ICON: "ICON",
+    CMD_M_BRIGHTNESS: "M_BRIGHTNESS",
+    CMD_M_SWITCH: "M_SWITCH",
     CMD_MODE: "MODE",
     CMD_SPEED: "SPEED",
     CMD_BRIGHTNESS: "BRIGHTNESS",
@@ -83,7 +90,9 @@ SCAN_RECORD_FW_VERSION = 21
 # Text-Encoding Konstanten
 TEXT_HEADER_SIZE = 24       # 24 Null-Bytes als Header
 TEXT_WIDTHS_PAD_SIZE = 80   # Char-Widths werden auf 80 Bytes gepaddet
-TEXT_CHUNK_SIZE = 128       # Daten werden in 128-Byte-Chunks aufgeteilt
+TEXT_CHUNK_SIZE = 128       # Daten werden in 128-Byte-Chunks aufgeteilt (Light1248)
+M_CHUNK_SIZE = 1024         # Daten-Chunk-Größe für M/U/UX-Geräte
+BEGIN_TRANSFER_DELAY_S = 0.05  # 50ms Delay nach begin_transfer (Light536)
 
 # Font-Dateien: Bytes pro Zeichen
 FONT_UNICODE12_BYTES_PER_CHAR = 24   # UNICODE12: 24 Bytes/Zeichen (12 Zeilen)
