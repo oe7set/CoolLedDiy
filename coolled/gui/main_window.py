@@ -2,20 +2,18 @@
 Hauptfenster der CoolLedDiy Anwendung.
 
 Enthält:
-- QTabWidget mit 5 Tabs (Scanner, Text, Bild, Controls, Debug)
+- QTabWidget mit 7 Tabs (Scanner, Text, Bild, Zeichnen, Animation, Controls, Debug)
 - Status-Bar mit Verbindungsstatus
 - Zentrale Verdrahtung aller Signals zwischen GUI und BLE-Layer
 """
 
 import logging
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QStatusBar,
     QTabWidget,
-    QWidget,
 )
 from qasync import asyncSlot
 
@@ -23,19 +21,25 @@ from coolled.ble.connection import BleConnection
 from coolled.ble.scanner import DiscoveredDevice
 from coolled.ble.transport import BleTransport
 from coolled.fonts.font_reader import FontReader
+from coolled.gui.animation_tab import AnimationTab
 from coolled.gui.control_tab import ControlTab
 from coolled.gui.debug_tab import DebugTab
+from coolled.gui.drawing_tab import DrawingTab
 from coolled.gui.image_tab import ImageTab
 from coolled.gui.scanner_tab import ScannerTab
 from coolled.gui.text_tab import TextTab
+from coolled.models.packet_log import PacketLog
 from coolled.protocol.commands import (
+    cmd_animation_packets,
     cmd_begin_transfer,
     cmd_brightness,
+    cmd_device_info,
     cmd_draw,
+    cmd_mirror,
     cmd_mode,
-    cmd_raw,
     cmd_speed,
     cmd_switch,
+    cmd_sync_time,
 )
 from coolled.protocol.text_encoding import encode_text_packets
 
@@ -48,12 +52,15 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CoolLedDiy - LED Matrix Controller")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(900, 650)
 
         # BLE-Layer
         self._connection = BleConnection(self)
         self._transport = BleTransport(self._connection, self)
         self._font_reader = FontReader()
+
+        # Paket-Log (zentrale Datenquelle für Debug-Tab)
+        self._packet_log = PacketLog(self)
 
         # UI aufbauen
         self._setup_ui()
@@ -69,12 +76,16 @@ class MainWindow(QMainWindow):
         self._scanner_tab = ScannerTab()
         self._text_tab = TextTab(self._font_reader)
         self._image_tab = ImageTab()
+        self._drawing_tab = DrawingTab()
+        self._animation_tab = AnimationTab()
         self._control_tab = ControlTab()
-        self._debug_tab = DebugTab()
+        self._debug_tab = DebugTab(self._packet_log)
 
         self._tabs.addTab(self._scanner_tab, "Scanner")
         self._tabs.addTab(self._text_tab, "Text")
         self._tabs.addTab(self._image_tab, "Bild")
+        self._tabs.addTab(self._drawing_tab, "Zeichnen")
+        self._tabs.addTab(self._animation_tab, "Animation")
         self._tabs.addTab(self._control_tab, "Controls")
         self._tabs.addTab(self._debug_tab, "Debug")
 
@@ -94,9 +105,9 @@ class MainWindow(QMainWindow):
         self._connection.disconnected.connect(self._on_disconnected)
         self._connection.connection_error.connect(self._on_connection_error)
 
-        # BLE-Daten → Debug-Log
-        self._transport.data_sent.connect(self._debug_tab.log_tx)
-        self._connection.notify_received.connect(self._debug_tab.log_rx)
+        # BLE-Daten → PacketLog → Debug-Tab
+        self._transport.data_sent.connect(self._packet_log.add_tx)
+        self._connection.notify_received.connect(self._packet_log.add_rx)
 
         # Text senden
         self._text_tab.send_text_requested.connect(self._on_send_text)
@@ -104,11 +115,20 @@ class MainWindow(QMainWindow):
         # Bild senden
         self._image_tab.send_image_requested.connect(self._on_send_image)
 
+        # Zeichnung senden (nutzt gleichen Handler wie Bild)
+        self._drawing_tab.send_drawing_requested.connect(self._on_send_image)
+
+        # Animation senden
+        self._animation_tab.send_animation_requested.connect(self._on_send_animation)
+
         # Controls
         self._control_tab.switch_requested.connect(self._on_switch)
         self._control_tab.brightness_requested.connect(self._on_brightness)
         self._control_tab.speed_requested.connect(self._on_speed)
         self._control_tab.mode_requested.connect(self._on_mode)
+        self._control_tab.sync_time_requested.connect(self._on_sync_time)
+        self._control_tab.mirror_requested.connect(self._on_mirror)
+        self._control_tab.device_info_requested.connect(self._on_device_info)
 
         # Debug Raw-Send
         self._debug_tab.send_raw_requested.connect(self._on_send_raw)
@@ -171,7 +191,7 @@ class MainWindow(QMainWindow):
 
     @asyncSlot(bytes)
     async def _on_send_image(self, bitmap: bytes) -> None:
-        """Sendet Bitmap-Daten an das Panel."""
+        """Sendet Bitmap-Daten an das Panel (Bild oder Zeichnung)."""
         if not self._connection.is_connected:
             self._status_bar.showMessage("Nicht verbunden!", 3000)
             return
@@ -188,6 +208,27 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._status_bar.showMessage(f"Fehler: {e}", 5000)
             logger.error(f"Bild-Sende-Fehler: {e}")
+
+    @asyncSlot(list, int)
+    async def _on_send_animation(self, frames: list, speed: int) -> None:
+        """Sendet eine Multi-Frame-Animation an das Panel."""
+        if not self._connection.is_connected:
+            self._status_bar.showMessage("Nicht verbunden!", 3000)
+            return
+
+        self._status_bar.showMessage("Sende Animation...")
+        try:
+            await self._transport.send_packet(cmd_begin_transfer())
+            packets = cmd_animation_packets(frames, speed)
+            success = await self._transport.send_packets(packets)
+
+            if success:
+                self._status_bar.showMessage("Animation gesendet!", 3000)
+            else:
+                self._status_bar.showMessage("Fehler beim Senden", 3000)
+        except Exception as e:
+            self._status_bar.showMessage(f"Fehler: {e}", 5000)
+            logger.error(f"Animation-Sende-Fehler: {e}")
 
     @asyncSlot(bool)
     async def _on_switch(self, on: bool) -> None:
@@ -208,6 +249,29 @@ class MainWindow(QMainWindow):
     async def _on_mode(self, mode: int) -> None:
         if self._connection.is_connected:
             await self._transport.send_packet(cmd_mode(mode))
+
+    @asyncSlot()
+    async def _on_sync_time(self) -> None:
+        """Synchronisiert die PC-Uhrzeit mit dem Gerät."""
+        if self._connection.is_connected:
+            await self._transport.send_packet(cmd_sync_time())
+            self._status_bar.showMessage("Zeit synchronisiert", 3000)
+
+    @asyncSlot(bool)
+    async def _on_mirror(self, enabled: bool) -> None:
+        """Aktiviert/deaktiviert die Display-Spiegelung."""
+        if self._connection.is_connected:
+            await self._transport.send_packet(cmd_mirror(enabled))
+            self._status_bar.showMessage(
+                f"Spiegelung {'aktiviert' if enabled else 'deaktiviert'}", 3000
+            )
+
+    @asyncSlot()
+    async def _on_device_info(self) -> None:
+        """Fragt Geräteinformationen ab."""
+        if self._connection.is_connected:
+            await self._transport.send_packet(cmd_device_info())
+            self._status_bar.showMessage("Geräteinformation angefragt", 3000)
 
     @asyncSlot(bytes)
     async def _on_send_raw(self, data: bytes) -> None:

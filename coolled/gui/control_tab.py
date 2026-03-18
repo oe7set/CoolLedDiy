@@ -8,7 +8,7 @@ Enthält:
 - Mode-Dropdown
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QGroupBox,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QSlider,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +32,9 @@ class ControlTab(QWidget):
     brightness_requested = Signal(int)    # 0-255
     speed_requested = Signal(int)         # 0-7
     mode_requested = Signal(int)          # Mode-ID
+    sync_time_requested = Signal()        # Zeit synchronisieren
+    mirror_requested = Signal(bool)       # Spiegelung Ein/Aus
+    device_info_requested = Signal()      # Geräteinformation abfragen
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -107,7 +111,65 @@ class ControlTab(QWidget):
         mode_layout.addStretch()
         layout.addWidget(mode_group)
 
+        # Zeitsynchronisation
+        time_group = QGroupBox("Zeitsynchronisation")
+        time_layout = QHBoxLayout(time_group)
+        self._sync_time_btn = QPushButton("Zeit synchronisieren")
+        self._sync_time_btn.clicked.connect(self.sync_time_requested.emit)
+        time_layout.addWidget(self._sync_time_btn)
+        self._time_label = QLabel("")
+        time_layout.addWidget(self._time_label)
+        time_layout.addStretch()
+        layout.addWidget(time_group)
+
+        # Live-Uhr aktualisieren
+        self._clock_timer = QTimer(self)
+        self._clock_timer.timeout.connect(self._update_clock)
+        self._clock_timer.start(1000)
+        self._update_clock()
+
+        # Spiegelung
+        mirror_group = QGroupBox("Spiegelung")
+        mirror_layout = QHBoxLayout(mirror_group)
+        self._mirror_btn = QPushButton("Spiegeln")
+        self._mirror_btn.setCheckable(True)
+        self._mirror_btn.clicked.connect(self._on_mirror_clicked)
+        mirror_layout.addWidget(self._mirror_btn)
+        self._mirror_label = QLabel("Gespiegelt: Nein")
+        mirror_layout.addWidget(self._mirror_label)
+        mirror_layout.addStretch()
+        layout.addWidget(mirror_group)
+
+        # Geräteinformation
+        info_group = QGroupBox("Geräteinformation")
+        info_layout = QVBoxLayout(info_group)
+        self._info_btn = QPushButton("Geräteinformation abfragen")
+        self._info_btn.clicked.connect(self.device_info_requested.emit)
+        info_layout.addWidget(self._info_btn)
+        self._info_display = QTextEdit()
+        self._info_display.setReadOnly(True)
+        self._info_display.setMaximumHeight(80)
+        self._info_display.setPlaceholderText("Noch keine Geräteinformation abgefragt...")
+        info_layout.addWidget(self._info_display)
+        layout.addWidget(info_group)
+
         layout.addStretch()
+
+    def _update_clock(self) -> None:
+        """Aktualisiert die Uhrzeit-Anzeige."""
+        from datetime import datetime
+        now = datetime.now()
+        self._time_label.setText(now.strftime("PC-Zeit: %H:%M:%S"))
+
+    def _on_mirror_clicked(self) -> None:
+        """Spiegelung ein/ausschalten."""
+        mirrored = self._mirror_btn.isChecked()
+        self._mirror_label.setText(f"Gespiegelt: {'Ja' if mirrored else 'Nein'}")
+        self.mirror_requested.emit(mirrored)
+
+    def set_device_info(self, info_text: str) -> None:
+        """Zeigt empfangene Geräteinformation an."""
+        self._info_display.setPlainText(info_text)
 
     def _on_power_clicked(self) -> None:
         """Schaltet das Display ein/aus."""

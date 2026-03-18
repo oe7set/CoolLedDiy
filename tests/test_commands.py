@@ -1,13 +1,19 @@
 """Tests für die Kommando-Builder."""
 
+from datetime import datetime
+
 from coolled.protocol.commands import (
+    cmd_animation_packets,
     cmd_begin_transfer,
     cmd_brightness,
+    cmd_device_info,
     cmd_draw,
+    cmd_mirror,
     cmd_mode,
     cmd_raw,
     cmd_speed,
     cmd_switch,
+    cmd_sync_time,
 )
 from coolled.protocol.framing import unframe_packet
 
@@ -60,3 +66,58 @@ class TestCommands:
         frame = cmd_raw(raw)
         payload = unframe_packet(frame)
         assert payload == raw
+
+    def test_cmd_sync_time(self):
+        dt = datetime(2025, 3, 15, 14, 30, 45)  # Samstag
+        frame = cmd_sync_time(dt)
+        payload = unframe_packet(frame)
+        assert payload[0] == 0x09  # CMD_SYNC_TIME
+        assert payload[1] == 25   # 2025 - 2000
+        assert payload[2] == 3    # März
+        assert payload[3] == 15   # Tag
+        assert payload[4] == 6    # Samstag (isoweekday)
+        assert payload[5] == 14   # Stunde
+        assert payload[6] == 30   # Minute
+        assert payload[7] == 45   # Sekunde
+
+    def test_cmd_sync_time_default(self):
+        """cmd_sync_time() ohne Parameter nutzt aktuelle Zeit."""
+        frame = cmd_sync_time()
+        payload = unframe_packet(frame)
+        assert payload[0] == 0x09
+        assert len(payload) == 8
+
+    def test_cmd_mirror_on(self):
+        frame = cmd_mirror(True)
+        payload = unframe_packet(frame)
+        assert payload[0] == 0x0C  # CMD_MIRROR
+        assert payload[1] == 0x01
+
+    def test_cmd_mirror_off(self):
+        frame = cmd_mirror(False)
+        payload = unframe_packet(frame)
+        assert payload[0] == 0x0C
+        assert payload[1] == 0x00
+
+    def test_cmd_device_info(self):
+        frame = cmd_device_info()
+        payload = unframe_packet(frame)
+        assert payload[0] == 0x1F  # CMD_DEVICE_INFO
+        assert len(payload) == 1
+
+    def test_cmd_animation_packets(self):
+        # 2 Frames à 96 Bytes (12×48 Bitmap)
+        frame1 = bytes([0xAA] * 96)
+        frame2 = bytes([0x55] * 96)
+        packets = cmd_animation_packets([frame1, frame2], speed=200)
+        assert len(packets) > 0
+        # Erstes Paket prüfen
+        payload = unframe_packet(packets[0])
+        assert payload[0] == 0x04  # CMD_ANIMATION
+
+    def test_cmd_animation_packets_single_frame(self):
+        frame = bytes([0xFF] * 32)
+        packets = cmd_animation_packets([frame], speed=100)
+        assert len(packets) >= 1
+        payload = unframe_packet(packets[0])
+        assert payload[0] == 0x04

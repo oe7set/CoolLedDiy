@@ -30,15 +30,39 @@ ESCAPE_BYTE = 0x02
 ESCAPE_XOR = 0x04
 
 # Kommando-Bytes (aus Light1248Utils.java Prefix-Listen)
+CMD_MUSIC = 0x01         # musicStartString
 CMD_TEXT = 0x02          # textStartString
 CMD_DRAW = 0x03          # drawStartString
+CMD_ANIMATION = 0x04     # animationStartString (getSendDataWithTypeStrings("04",...))
 CMD_ICON = 0x05          # iconStartString
 CMD_MODE = 0x06          # modeStartString
 CMD_SPEED = 0x07         # speedStartString
 CMD_BRIGHTNESS = 0x08    # brightStartString
-CMD_SWITCH = 0x09        # switchStartString
+CMD_SWITCH = 0x09        # switchStartString (Light1248) / SYNC_TIME (UX-Geräte)
 CMD_BEGIN_TRANSFER = 0x0A  # beginTransferStartString
-CMD_MUSIC = 0x01         # musicStartString
+CMD_MIRROR = 0x0C        # getSetMirror() in CoolledUXUtils.java:3958
+CMD_DEVICE_INFO = 0x1F   # getDeviceInfo() in CoolledUXUtils.java:3934
+
+# Hinweis: CMD_SWITCH (0x09) wird auf Light1248-Geräten als Switch verwendet,
+# auf CoolLEDUX-Geräten als Time-Sync (getSynchronizeTime).
+# CoolLEDM/UX verwenden 0x05 für Switch.
+CMD_SYNC_TIME = 0x09     # getSynchronizeTime() in CoolledUXUtils.java:4036
+
+# Kommando-Namen für Debug-Anzeige (Dissector)
+CMD_NAMES = {
+    CMD_MUSIC: "MUSIC",
+    CMD_TEXT: "TEXT",
+    CMD_DRAW: "DRAW",
+    CMD_ANIMATION: "ANIMATION",
+    CMD_ICON: "ICON",
+    CMD_MODE: "MODE",
+    CMD_SPEED: "SPEED",
+    CMD_BRIGHTNESS: "BRIGHTNESS",
+    CMD_SWITCH: "SWITCH/SYNC_TIME",
+    CMD_BEGIN_TRANSFER: "BEGIN_TRANSFER",
+    CMD_MIRROR: "MIRROR",
+    CMD_DEVICE_INFO: "DEVICE_INFO",
+}
 
 # Farb-Typen aus Scan-Record (DeviceManager.java)
 COLOR_SINGLE = 0         # Einfarbig
