@@ -89,15 +89,15 @@ TEXT_CHUNK_SIZE = 128       # Daten werden in 128-Byte-Chunks aufgeteilt
 FONT_UNICODE12_BYTES_PER_CHAR = 24   # UNICODE12: 24 Bytes/Zeichen (12 Zeilen)
 FONT_UNICODE16_BYTES_PER_CHAR = 32   # UNICODE16: 32 Bytes/Zeichen (16 Zeilen)
 
-# Display-Modi (typische Werte aus der App)
-MODE_STATIC = 0
-MODE_SCROLL_LEFT = 1
-MODE_SCROLL_RIGHT = 2
-MODE_SCROLL_UP = 3
-MODE_SCROLL_DOWN = 4
-MODE_FLASH = 5
+# Display-Modi (1-indexiert, Android-App sendet modeIndex + 1)
+# Siehe LightFragment536.java:336, LightFragmentA.java:356
+MODE_STATIC = 1
+MODE_SCROLL_LEFT = 2
+MODE_SCROLL_RIGHT = 3
+MODE_SCROLL_UP = 4
+MODE_SCROLL_DOWN = 5
 MODE_SNOWFLAKE = 6
-MODE_CURTAIN = 7
+MODE_PICTURE = 7
 MODE_LASER = 8
 
 MODE_NAMES = {
@@ -106,8 +106,7 @@ MODE_NAMES = {
     MODE_SCROLL_RIGHT: "Scrollen Rechts",
     MODE_SCROLL_UP: "Scrollen Hoch",
     MODE_SCROLL_DOWN: "Scrollen Runter",
-    MODE_FLASH: "Blinken",
     MODE_SNOWFLAKE: "Schneeflocke",
-    MODE_CURTAIN: "Vorhang",
+    MODE_PICTURE: "Bild",
     MODE_LASER: "Laser",
 }

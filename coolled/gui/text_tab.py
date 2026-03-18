@@ -91,10 +91,10 @@ class TextTab(QWidget):
         speed_layout = QHBoxLayout()
         speed_layout.addWidget(QLabel("Geschwindigkeit:"))
         self._speed_slider = QSlider(Qt.Orientation.Horizontal)
-        self._speed_slider.setRange(0, 7)
-        self._speed_slider.setValue(3)
+        self._speed_slider.setRange(0, 255)
+        self._speed_slider.setValue(127)
         speed_layout.addWidget(self._speed_slider)
-        self._speed_label = QLabel("3")
+        self._speed_label = QLabel("127")
         self._speed_slider.valueChanged.connect(
             lambda v: self._speed_label.setText(str(v))
         )

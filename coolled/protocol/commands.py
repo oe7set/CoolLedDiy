@@ -82,6 +82,52 @@ def cmd_draw(bitmap_data: bytes) -> bytes:
     return frame_packet(bytes([CMD_DRAW]) + bitmap_data)
 
 
+def cmd_draw_packets(bitmap_data: bytes) -> list[bytes]:
+    """Baut Draw-Pakete mit Chunk-Protokoll (wie Text/Animation).
+
+    Entspricht getIconDataStrings() in Light1248Utils.java:353-392.
+    Nutzt das gleiche Chunk-Format wie Text und Animation:
+    24-Byte-Header + Datenlänge(2B BE) + Bitmap-Daten, aufgeteilt in 128-Byte-Chunks.
+
+    Args:
+        bitmap_data: Spaltenweise codierte Pixel-Daten
+
+    Returns:
+        Liste von Frame-Paketen, bereit zum Senden
+    """
+    # Gesamtdaten: 24 Null-Header + Datenlänge(2B BE) + Bitmap
+    data_length = len(bitmap_data)
+    all_data = bytearray(TEXT_HEADER_SIZE)  # 24 Null-Bytes
+    all_data.extend(int_to_2bytes_be(data_length))
+    all_data.extend(bitmap_data)
+
+    # In 128-Byte-Chunks aufteilen
+    chunks = []
+    for i in range(0, len(all_data), TEXT_CHUNK_SIZE):
+        chunks.append(bytes(all_data[i:i + TEXT_CHUNK_SIZE]))
+
+    # Pro Chunk: Metadata + Checksum + CMD_DRAW + Frame
+    total_data_length = int_to_2bytes_be(len(all_data))
+    packets = []
+
+    for chunk_index, chunk in enumerate(chunks):
+        # Chunk-Prefix: [0x00] + total_len(2B) + chunk_idx(2B) + chunk_size(1B)
+        chunk_prefix = (
+            bytes([0x00])
+            + total_data_length
+            + int_to_2bytes_be(chunk_index)
+            + bytes([len(chunk)])
+        )
+        chunk_with_prefix = chunk_prefix + chunk
+        checksum = _xor_checksum(chunk_with_prefix)
+        chunk_with_checksum = chunk_with_prefix + bytes([checksum])
+
+        payload = bytes([CMD_DRAW]) + chunk_with_checksum
+        packets.append(frame_packet(payload))
+
+    return packets
+
+
 def cmd_raw(payload: bytes) -> bytes:
     """Verpackt beliebige Payload-Daten in ein Frame-Paket.
 

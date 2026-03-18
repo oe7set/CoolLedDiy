@@ -34,7 +34,7 @@ from coolled.protocol.commands import (
     cmd_begin_transfer,
     cmd_brightness,
     cmd_device_info,
-    cmd_draw,
+    cmd_draw_packets,
     cmd_mirror,
     cmd_mode,
     cmd_speed,
@@ -168,14 +168,15 @@ class MainWindow(QMainWindow):
 
         self._status_bar.showMessage("Sende Text...")
         try:
-            # Begin Transfer
-            await self._transport.send_packet(cmd_begin_transfer())
-
-            # Mode und Speed setzen
+            # Mode und Speed zuerst setzen, dann Transfer starten
+            # (Android-App sendet Mode/Speed separat, nicht zwischen begin und data)
             mode = self._text_tab.selected_mode
             speed = self._text_tab.selected_speed
             await self._transport.send_packet(cmd_mode(mode))
             await self._transport.send_packet(cmd_speed(speed))
+
+            # Begin Transfer
+            await self._transport.send_packet(cmd_begin_transfer())
 
             # Text-Pakete kodieren und senden
             packets = encode_text_packets(text, self._font_reader, use_font_16)
@@ -199,7 +200,9 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Sende Bild...")
         try:
             await self._transport.send_packet(cmd_begin_transfer())
-            success = await self._transport.send_packet(cmd_draw(bitmap))
+            # Chunk-Protokoll wie Text/Animation (getIconDataStrings)
+            packets = cmd_draw_packets(bitmap)
+            success = await self._transport.send_packets(packets)
 
             if success:
                 self._status_bar.showMessage("Bild gesendet!", 3000)

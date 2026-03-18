@@ -8,6 +8,7 @@ from coolled.protocol.commands import (
     cmd_brightness,
     cmd_device_info,
     cmd_draw,
+    cmd_draw_packets,
     cmd_mirror,
     cmd_mode,
     cmd_raw,
@@ -60,6 +61,23 @@ class TestCommands:
         payload = unframe_packet(frame)
         assert payload[0] == 0x03  # CMD_DRAW
         assert payload[1:] == bitmap
+
+    def test_cmd_draw_packets(self):
+        """cmd_draw_packets erzeugt Chunk-Pakete mit CMD_DRAW (0x03)."""
+        bitmap = bytes([0xFF] * 96)
+        packets = cmd_draw_packets(bitmap)
+        assert len(packets) > 0
+        # Erstes Paket prüfen: CMD_DRAW Header
+        payload = unframe_packet(packets[0])
+        assert payload[0] == 0x03  # CMD_DRAW
+
+    def test_cmd_draw_packets_small(self):
+        """Kleine Bitmap passt in einen einzelnen Chunk."""
+        bitmap = bytes([0xAA] * 32)
+        packets = cmd_draw_packets(bitmap)
+        assert len(packets) >= 1
+        payload = unframe_packet(packets[0])
+        assert payload[0] == 0x03
 
     def test_cmd_raw(self):
         raw = bytes([0x42, 0x43])

@@ -30,7 +30,7 @@ class ControlTab(QWidget):
     # Signals für einzelne Steuerkommandos
     switch_requested = Signal(bool)       # Ein/Aus
     brightness_requested = Signal(int)    # 0-255
-    speed_requested = Signal(int)         # 0-7
+    speed_requested = Signal(int)         # 0-255
     mode_requested = Signal(int)          # Mode-ID
     sync_time_requested = Signal()        # Zeit synchronisieren
     mirror_requested = Signal(bool)       # Spiegelung Ein/Aus
@@ -61,10 +61,10 @@ class ControlTab(QWidget):
         bright_layout = QHBoxLayout(bright_group)
         self._bright_slider = QSlider()
         self._bright_slider.setOrientation(Qt.Orientation.Horizontal)
-        self._bright_slider.setRange(0, 7)
-        self._bright_slider.setValue(4)
+        self._bright_slider.setRange(0, 255)
+        self._bright_slider.setValue(255)
         bright_layout.addWidget(self._bright_slider)
-        self._bright_label = QLabel("4")
+        self._bright_label = QLabel("255")
         self._bright_slider.valueChanged.connect(
             lambda v: self._bright_label.setText(str(v))
         )
@@ -81,10 +81,10 @@ class ControlTab(QWidget):
         speed_layout = QHBoxLayout(speed_group)
         self._speed_slider = QSlider()
         self._speed_slider.setOrientation(Qt.Orientation.Horizontal)
-        self._speed_slider.setRange(0, 7)
-        self._speed_slider.setValue(3)
+        self._speed_slider.setRange(0, 255)
+        self._speed_slider.setValue(127)
         speed_layout.addWidget(self._speed_slider)
-        self._speed_label = QLabel("3")
+        self._speed_label = QLabel("127")
         self._speed_slider.valueChanged.connect(
             lambda v: self._speed_label.setText(str(v))
         )
