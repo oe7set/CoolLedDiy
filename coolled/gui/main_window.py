@@ -43,8 +43,11 @@ from coolled.protocol.commands import (
     cmd_sync_time,
 )
 from coolled.protocol.commands_advanced import (
+    build_animation_content,
+    build_draw_content,
     build_program_data,
     build_program_transfer,
+    build_text_content,
     cmd_brightness_m,
     cmd_switch_m,
 )
@@ -73,8 +76,10 @@ class MainWindow(QMainWindow):
         self._transport = BleTransport(self._connection, self)
         self._font_reader = FontReader()
 
-        # Gerätefamilie (wird beim Connect gesetzt)
+        # Gerätefamilie und Panel-Dimensionen (werden beim Connect gesetzt)
         self._device_family: DeviceFamily = DeviceFamily.LIGHT_1248
+        self._panel_width: int = 96   # Default Spalten
+        self._panel_height: int = 16  # Default Zeilen
 
         # Paket-Log (zentrale Datenquelle für Debug-Tab)
         self._packet_log = PacketLog(self)
@@ -158,7 +163,11 @@ class MainWindow(QMainWindow):
         self._connection_label.setText(f"Verbinde mit {device.name}...")
         # Gerätefamilie aus Scanner-Ergebnis übernehmen
         self._device_family = device.device_family
-        logger.info(f"Gerätefamilie: {self._device_family.value}")
+        # Panel-Dimensionen aus Scan-Record übernehmen (falls verfügbar)
+        if device.scan_info:
+            self._panel_width = device.scan_info.columns
+            self._panel_height = device.scan_info.rows
+        logger.info(f"Gerätefamilie: {self._device_family.value}, Panel: {self._panel_width}x{self._panel_height}")
         success = await self._connection.connect(device.ble_device)
         if not success:
             self._connection_label.setText("Verbindung fehlgeschlagen")
@@ -194,22 +203,28 @@ class MainWindow(QMainWindow):
 
         self._status_bar.showMessage("Sende Text...")
         try:
-            # Mode und Speed zuerst setzen
             mode = self._text_tab.selected_mode
             speed = self._text_tab.selected_speed
-            await self._transport.send_packet(cmd_mode(mode))
-            await self._transport.send_packet(cmd_speed(speed))
 
             if uses_advanced_protocol(self._device_family):
-                # M/U/UX: Programm-Format mit LZSS + CRC
-                text_packets_data = encode_text_packets(text, self._font_reader, use_font_16)
-                # Rohe Text-Daten für Programm-Wrapper extrahieren
-                content_data = b"".join(text_packets_data)
-                program_data = build_program_data(content_data)
+                # M/U/UX: Rohe Font-Bitmap-Daten in Content-Struktur verpacken
+                # (Mode/Speed sind im Content-Header eingebettet, NICHT separat senden)
+                if use_font_16:
+                    font_data, _ = self._font_reader.read_text_16(text)
+                else:
+                    font_data, _ = self._font_reader.read_text_12(text)
+                content = build_text_content(
+                    font_data, self._panel_width, self._panel_height, mode, speed,
+                )
+                program_data = build_program_data(content)
                 start_pkt, data_pkts = build_program_transfer(program_data)
                 await self._transport.send_packet(start_pkt)
                 success = await self._transport.send_packets(data_pkts)
             else:
+                # Light1248/536: Mode und Speed separat setzen
+                await self._transport.send_packet(cmd_mode(mode))
+                await self._transport.send_packet(cmd_speed(speed))
+
                 # Light536: begin_transfer + 50ms Delay
                 if uses_begin_transfer(self._device_family):
                     await self._transport.send_packet(cmd_begin_transfer())
@@ -243,8 +258,9 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Sende Bild...")
         try:
             if uses_advanced_protocol(self._device_family):
-                # M/U/UX: Programm-Format
-                program_data = build_program_data(bitmap)
+                # M/U/UX: Bitmap in Content-Struktur verpacken
+                content = build_draw_content(bitmap, self._panel_width, self._panel_height)
+                program_data = build_program_data(content)
                 start_pkt, data_pkts = build_program_transfer(program_data)
                 await self._transport.send_packet(start_pkt)
                 success = await self._transport.send_packets(data_pkts)
@@ -282,9 +298,13 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage("Sende Animation...")
         try:
             if uses_advanced_protocol(self._device_family):
-                # M/U/UX: Programm-Format
-                anim_data = b"".join(cmd_animation_packets(frames, speed))
-                program_data = build_program_data(anim_data)
+                # M/U/UX: Rohe Frame-Daten in Content-Struktur verpacken
+                # (frames ist list[bytes] mit Bitmap-Daten pro Frame)
+                raw_anim = b"".join(frames)
+                content = build_animation_content(
+                    raw_anim, self._panel_width, self._panel_height, speed,
+                )
+                program_data = build_program_data(content)
                 start_pkt, data_pkts = build_program_transfer(program_data)
                 await self._transport.send_packet(start_pkt)
                 success = await self._transport.send_packets(data_pkts)

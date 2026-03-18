@@ -171,6 +171,139 @@ def build_program_transfer(
     return start_packet, data_packets
 
 
+def _build_content_header(
+    content_type: int,
+    show_width: int,
+    show_height: int,
+    layer_type: int = 0,
+    start_col: int = 0,
+    start_row: int = 0,
+) -> bytes:
+    """Baut den gemeinsamen Content-Header (ohne mode/speed/data-Felder).
+
+    Struktur: [content_type(1B)] + [7x 0x00] + [layerType(1B)]
+              + [startCol(2B BE)] + [startRow(2B BE)]
+              + [showWidth(2B BE)] + [showHeight(2B BE)]
+    """
+    return (
+        bytes([content_type])
+        + bytes(7)  # 7 Null-Bytes Padding
+        + bytes([layer_type & 0xFF])
+        + int_to_2bytes_be(start_col)
+        + int_to_2bytes_be(start_row)
+        + int_to_2bytes_be(show_width)
+        + int_to_2bytes_be(show_height)
+    )
+
+
+def build_text_content(
+    font_data: bytes,
+    show_width: int,
+    show_height: int,
+    mode: int = 1,
+    speed: int = 0,
+    stay_time: int = 0,
+    layer_type: int = 0,
+    start_col: int = 0,
+    start_row: int = 0,
+) -> bytes:
+    """Baut TextContentProgramContent-Struktur (Type=0x01).
+
+    Entspricht CoolledMUtils.java:1401-1423.
+    Enthält den 4-Byte-Längenprefix (size+4).
+
+    Args:
+        font_data: Rohe Font-Bitmap-Daten (aus FontReader)
+        show_width: Panel-Breite in Pixeln
+        show_height: Panel-Höhe in Pixeln
+        mode: Display-Modus (z.B. Scroll-Richtung)
+        speed: Scroll-Geschwindigkeit
+        stay_time: Standzeit (Standard 0)
+        layer_type: Layer-Typ (Standard 0)
+        start_col: Start-Spalte (Standard 0)
+        start_row: Start-Zeile (Standard 0)
+
+    Returns:
+        Content-Block mit 4-Byte-Längenprefix
+    """
+    header = _build_content_header(0x01, show_width, show_height, layer_type, start_col, start_row)
+    data_len = _int_to_4bytes_be(len(font_data))
+    inner = header + bytes([mode & 0xFF, speed & 0xFF, stay_time & 0xFF]) + data_len + font_data
+    # 4-Byte-Längenprefix: Gesamtlänge inkl. dieser 4 Bytes
+    size_prefix = _int_to_4bytes_be(len(inner) + 4)
+    return size_prefix + inner
+
+
+def build_draw_content(
+    bitmap_data: bytes,
+    show_width: int,
+    show_height: int,
+    mode: int = 1,
+    speed: int = 0,
+    stay_time: int = 0,
+    layer_type: int = 0,
+    start_col: int = 0,
+    start_row: int = 0,
+) -> bytes:
+    """Baut GraffitiCombineProgram-Struktur (Type=0x02).
+
+    Entspricht CoolledMUtils.java:1463-1484.
+
+    Args:
+        bitmap_data: Bitmap-Daten (z.B. aus Image-Converter)
+        show_width: Panel-Breite in Pixeln
+        show_height: Panel-Höhe in Pixeln
+        mode: Display-Modus
+        speed: Scroll-Geschwindigkeit
+        stay_time: Standzeit (Standard 0)
+        layer_type: Layer-Typ (Standard 0)
+        start_col: Start-Spalte (Standard 0)
+        start_row: Start-Zeile (Standard 0)
+
+    Returns:
+        Content-Block mit 4-Byte-Längenprefix
+    """
+    header = _build_content_header(0x02, show_width, show_height, layer_type, start_col, start_row)
+    data_len = _int_to_4bytes_be(len(bitmap_data))
+    inner = header + bytes([mode & 0xFF, speed & 0xFF, stay_time & 0xFF]) + data_len + bitmap_data
+    size_prefix = _int_to_4bytes_be(len(inner) + 4)
+    return size_prefix + inner
+
+
+def build_animation_content(
+    anim_data: bytes,
+    show_width: int,
+    show_height: int,
+    speed: int = 100,
+    layer_type: int = 0,
+    start_col: int = 0,
+    start_row: int = 0,
+) -> bytes:
+    """Baut AnimationCombineProgram-Struktur (Type=0x03).
+
+    Entspricht CoolledMUtils.java:1433-1453.
+    Unterschied zu Text/Draw: kein mode-Byte, speed ist 2 Bytes BE.
+
+    Args:
+        anim_data: Animation-Frame-Daten (alle Frames konkateniert)
+        show_width: Panel-Breite in Pixeln
+        show_height: Panel-Höhe in Pixeln
+        speed: Animation-Geschwindigkeit (2 Bytes BE)
+        layer_type: Layer-Typ (Standard 0)
+        start_col: Start-Spalte (Standard 0)
+        start_row: Start-Zeile (Standard 0)
+
+    Returns:
+        Content-Block mit 4-Byte-Längenprefix
+    """
+    header = _build_content_header(0x03, show_width, show_height, layer_type, start_col, start_row)
+    data_len = _int_to_4bytes_be(len(anim_data))
+    # Animation: [0x00 Padding] + [speed 2B BE] (kein mode-Byte)
+    inner = header + bytes([0x00]) + int_to_2bytes_be(speed) + data_len + anim_data
+    size_prefix = _int_to_4bytes_be(len(inner) + 4)
+    return size_prefix + inner
+
+
 def cmd_brightness_m(brightness: int) -> bytes:
     """Setzt die Helligkeit (M/U/UX-Geräte).
 

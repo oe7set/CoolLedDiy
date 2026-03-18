@@ -37,7 +37,7 @@ def lzss_compress(data: bytes) -> bytes:
     length = len(data)
 
     # Zirkulärer Buffer: 0..N-1 für Window, N..N+F-1 als Lookahead-Kopie
-    enbuffer = bytearray(N + N)
+    enbuffer = bytearray(N + F + 1)
 
     # Binärer Suchbaum für Matching
     lson = [0] * (N + 1)

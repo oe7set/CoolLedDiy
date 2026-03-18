@@ -35,11 +35,11 @@ _NAME_PREFIXES: list[tuple[str, DeviceFamily]] = [
     ("iLedClock", DeviceFamily.COOLED_UX),
     ("iLedOpen", DeviceFamily.COOLED_UX),
     ("iLedHatC", DeviceFamily.COOLED_UX),
+    ("iDevilEyes", DeviceFamily.COOLED_UX),
+    ("iLedHat", DeviceFamily.COOLED_UX),
     # U-Familie (inkl. UD-Variante)
     ("CoolLEDU", DeviceFamily.COOLED_U),
     ("iLedBike", DeviceFamily.COOLED_U),
-    ("iLedHat", DeviceFamily.COOLED_U),
-    ("iDevilEyes", DeviceFamily.COOLED_U),
     # M-Familie
     ("CoolLEDM", DeviceFamily.COOLED_M),
     # 536-Familie

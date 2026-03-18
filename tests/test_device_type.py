@@ -60,10 +60,12 @@ class TestDetectDeviceFamily:
         assert detect_device_family("iLedBike") == DeviceFamily.COOLED_U
 
     def test_iledhat(self):
-        assert detect_device_family("iLedHat") == DeviceFamily.COOLED_U
+        """iLedHat ist UX-Familie (wie in DeviceManager.java:830)."""
+        assert detect_device_family("iLedHat") == DeviceFamily.COOLED_UX
 
     def test_idevileyes(self):
-        assert detect_device_family("iDevilEyes") == DeviceFamily.COOLED_U
+        """iDevilEyes ist UX-Familie (wie in DeviceManager.java:830)."""
+        assert detect_device_family("iDevilEyes") == DeviceFamily.COOLED_UX
 
     # --- CoolledUX Familie ---
 

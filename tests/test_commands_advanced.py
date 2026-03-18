@@ -1,10 +1,13 @@
 """Tests für die erweiterten Kommando-Builder (M/U/UX-Geräte)."""
 
 from coolled.protocol.commands_advanced import (
+    build_animation_content,
     build_data_packets,
+    build_draw_content,
     build_program_data,
     build_program_transfer,
     build_start_packet,
+    build_text_content,
     cmd_brightness_m,
     cmd_switch_m,
 )
@@ -170,3 +173,102 @@ class TestCmdSwitchM:
         payload = unframe_packet(frame)
         assert payload[0] == CMD_M_SWITCH
         assert payload[1] == 0x00
+
+
+class TestBuildTextContent:
+    def test_text_content_format(self):
+        """TextContentProgramContent: Type=0x01, Header, mode/speed/stay, dataLen, data."""
+        font_data = bytes([0xAA, 0xBB, 0xCC, 0xDD])
+        content = build_text_content(font_data, show_width=96, show_height=16, mode=3, speed=5)
+
+        # 4-Byte Längenprefix (Big-Endian)
+        size = int.from_bytes(content[0:4], "big")
+        assert size == len(content)  # size+4 inkl. Prefix
+
+        # Content-Typ = 0x01
+        assert content[4] == 0x01
+        # 7 Null-Bytes Padding
+        assert content[5:12] == bytes(7)
+        # layerType = 0
+        assert content[12] == 0
+        # startCol = 0 (2B BE)
+        assert content[13:15] == bytes(2)
+        # startRow = 0 (2B BE)
+        assert content[15:17] == bytes(2)
+        # showWidth = 96 (2B BE)
+        assert int.from_bytes(content[17:19], "big") == 96
+        # showHeight = 16 (2B BE)
+        assert int.from_bytes(content[19:21], "big") == 16
+        # mode = 3
+        assert content[21] == 3
+        # speed = 5
+        assert content[22] == 5
+        # stayTime = 0
+        assert content[23] == 0
+        # dataLen (4B BE)
+        data_len = int.from_bytes(content[24:28], "big")
+        assert data_len == len(font_data)
+        # font_data
+        assert content[28:] == font_data
+
+    def test_content_wrapper_length(self):
+        """4-Byte Längenprefix == Gesamtlänge des Content-Blocks."""
+        data = bytes(200)
+        content = build_text_content(data, 128, 32)
+        size = int.from_bytes(content[0:4], "big")
+        assert size == len(content)
+
+
+class TestBuildDrawContent:
+    def test_draw_content_format(self):
+        """GraffitiCombineProgram: Type=0x02, gleiche Struktur wie Text."""
+        bitmap = bytes(64)
+        content = build_draw_content(bitmap, show_width=48, show_height=16, mode=1, speed=2)
+
+        size = int.from_bytes(content[0:4], "big")
+        assert size == len(content)
+        # Content-Typ = 0x02
+        assert content[4] == 0x02
+        # showWidth
+        assert int.from_bytes(content[17:19], "big") == 48
+        # showHeight
+        assert int.from_bytes(content[19:21], "big") == 16
+        # mode
+        assert content[21] == 1
+        # speed
+        assert content[22] == 2
+        # dataLen
+        data_len = int.from_bytes(content[24:28], "big")
+        assert data_len == 64
+        # bitmap data
+        assert content[28:] == bitmap
+
+
+class TestBuildAnimationContent:
+    def test_animation_content_format(self):
+        """AnimationCombineProgram: Type=0x03, speed als 2 Bytes BE, kein mode-Byte."""
+        anim = bytes(128)
+        content = build_animation_content(anim, show_width=96, show_height=16, speed=150)
+
+        size = int.from_bytes(content[0:4], "big")
+        assert size == len(content)
+        # Content-Typ = 0x03
+        assert content[4] == 0x03
+        # showWidth
+        assert int.from_bytes(content[17:19], "big") == 96
+        # showHeight
+        assert int.from_bytes(content[19:21], "big") == 16
+        # 0x00 Padding (kein mode-Byte)
+        assert content[21] == 0x00
+        # Speed als 2 Bytes BE
+        assert int.from_bytes(content[22:24], "big") == 150
+        # dataLen
+        data_len = int.from_bytes(content[24:28], "big")
+        assert data_len == 128
+        # anim data
+        assert content[28:] == anim
+
+    def test_animation_speed_2bytes(self):
+        """Speed > 255 muss korrekt als 2 Bytes enkodiert werden."""
+        content = build_animation_content(bytes(10), 96, 16, speed=300)
+        assert int.from_bytes(content[22:24], "big") == 300
