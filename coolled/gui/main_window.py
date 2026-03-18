@@ -54,7 +54,6 @@ from coolled.protocol.commands_advanced import (
 from coolled.protocol.constants import BEGIN_TRANSFER_DELAY_S
 from coolled.protocol.device_type import (
     DeviceFamily,
-    detect_device_family,
     uses_advanced_protocol,
     uses_begin_transfer,
 )
@@ -130,6 +129,9 @@ class MainWindow(QMainWindow):
         # BLE-Daten → PacketLog → Debug-Tab
         self._transport.data_sent.connect(self._packet_log.add_tx)
         self._connection.notify_received.connect(self._packet_log.add_rx)
+
+        # Notify-Daten verarbeiten (z.B. Device-Info Antwort)
+        self._connection.notify_received.connect(self._on_notify)
 
         # Text senden
         self._text_tab.send_text_requested.connect(self._on_send_text)
@@ -343,11 +345,19 @@ class MainWindow(QMainWindow):
     @asyncSlot(int)
     async def _on_speed(self, value: int) -> None:
         if self._connection.is_connected:
+            if uses_advanced_protocol(self._device_family):
+                self._status_bar.showMessage(
+                    "Speed wird beim Senden im Content-Header gesetzt", 3000)
+                return
             await self._transport.send_packet(cmd_speed(value))
 
     @asyncSlot(int)
     async def _on_mode(self, mode: int) -> None:
         if self._connection.is_connected:
+            if uses_advanced_protocol(self._device_family):
+                self._status_bar.showMessage(
+                    "Modus wird beim Senden im Content-Header gesetzt", 3000)
+                return
             await self._transport.send_packet(cmd_mode(mode))
 
     @asyncSlot()
@@ -372,6 +382,15 @@ class MainWindow(QMainWindow):
         if self._connection.is_connected:
             await self._transport.send_packet(cmd_device_info())
             self._status_bar.showMessage("Geräteinformation angefragt", 3000)
+
+    def _on_notify(self, data: bytes) -> None:
+        """Verarbeitet empfangene BLE-Notify-Daten."""
+        from coolled.protocol.framing import unframe_packet
+        payload = unframe_packet(data)
+        if payload and len(payload) > 1 and payload[0] == 0x1F:  # CMD_DEVICE_INFO
+            # Rohe Hex-Darstellung der Antwort anzeigen
+            info_hex = payload[1:].hex(" ")
+            self._control_tab.set_device_info(f"Device-Info Response:\n{info_hex}")
 
     @asyncSlot(bytes)
     async def _on_send_raw(self, data: bytes) -> None:

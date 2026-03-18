@@ -121,6 +121,11 @@ class TextTab(QWidget):
             return
 
         use_font_16 = self._font_combo.currentData()
+        preview_rows = 16 if use_font_16 else 12
+
+        # Preview-Zeilen an gewählten Font anpassen
+        if self._preview.rows != preview_rows:
+            self._preview.set_size(preview_rows, self._preview.columns)
 
         try:
             if use_font_16:
@@ -129,7 +134,7 @@ class TextTab(QWidget):
                 font_data, widths = self._font_reader.read_text_12(text)
 
             # Font-Daten als Bitmap in Preview anzeigen
-            self._preview.set_bitmap(font_data)
+            self._preview.set_bitmap(font_data, preview_rows)
         except Exception:
             self._preview.clear()
 
