@@ -106,6 +106,49 @@ def image_to_bitmap(image: Image.Image, rows: int, threshold: int = 128) -> byte
     return bytes(result)
 
 
+def rgb444_transfer(value: int) -> int:
+    """Konvertiert einen 8-Bit Farbkanal (0-255) in 4-Bit RGB444 (0-15).
+
+    Entspricht rgb444Transfer() im ESP32-Referenzcode und
+    TextEmojiManagerCoolLEDUX.getColorDataWithColorWithRGB444Transfer() in der Android-App.
+    """
+    if value >= 238:
+        return 15
+    if value <= 47:
+        return 0
+    return ((value - 47) // 14) + 1
+
+
+def image_to_rgb444(image: Image.Image, width: int, height: int) -> bytes:
+    """Konvertiert ein Bild in RGB444-Pixeldaten für CoolLedUX-Geräte.
+
+    Column-major Reihenfolge: für jede Spalte x, für jede Zeile y.
+    Pro Pixel 2 Bytes: [R_4bit, (G_4bit << 4) | B_4bit].
+
+    Basiert auf getDrawListDataFColor() in CoolledUXUtils.java und dem
+    funktionierenden ESP32-Referenzcode (setPixel/buildProgramData).
+
+    Args:
+        image: Eingabe-Bild (sollte bereits auf Panel-Größe skaliert sein)
+        width: Panel-Breite in Pixeln (Spalten)
+        height: Panel-Höhe in Pixeln (Zeilen)
+
+    Returns:
+        RGB444-Pixeldaten (Länge = width * height * 2)
+    """
+    rgb = image.convert("RGB")
+    pixels = rgb.load()
+
+    result = bytearray()
+    for x in range(width):
+        for y in range(height):
+            r, g, b = pixels[x, y]
+            result.append(rgb444_transfer(r))
+            result.append((rgb444_transfer(g) << 4) | rgb444_transfer(b))
+
+    return bytes(result)
+
+
 def bitmap_to_image(bitmap: bytes, rows: int, columns: int) -> Image.Image:
     """Konvertiert Bitmap-Daten zurück in ein Bild (für Preview).
 

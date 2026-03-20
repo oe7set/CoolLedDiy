@@ -8,17 +8,25 @@ from coolled.protocol.commands_advanced import (
     build_program_transfer,
     build_start_packet,
     build_text_content,
+    build_text_content_ux,
     cmd_brightness_m,
     cmd_switch_m,
+    cmd_ux_play,
 )
-from coolled.protocol.constants import CMD_M_BRIGHTNESS, CMD_M_DATA, CMD_M_START, CMD_M_SWITCH
+from coolled.protocol.constants import (
+    CMD_M_BRIGHTNESS,
+    CMD_M_DATA,
+    CMD_M_START,
+    CMD_M_SWITCH,
+    CMD_UX_PLAY,
+)
 from coolled.protocol.crc32 import crc32_coolled_bytes
 from coolled.protocol.framing import unframe_packet
 
 
 class TestBuildStartPacket:
     def test_start_packet_format(self):
-        """Start-Paket: CMD_M_START + CRC(4B) + Len(4B) + Count(1B) + Show(1B)."""
+        """Start-Paket: CMD_M_START + CRC(4B) + Len(4B) + Index(1B) + Count(1B) + Show(1B)."""
         data = bytes(range(100))
         packet = build_start_packet(data, content_count=1, show_count=0)
         payload = unframe_packet(packet)
@@ -30,16 +38,26 @@ class TestBuildStartPacket:
         # Total Length (4 Bytes BE)
         expected_len = len(data).to_bytes(4, "big")
         assert payload[5:9] == expected_len
-        # Content Count + Show Count
-        assert payload[9] == 1
-        assert payload[10] == 0
+        # Index + Content Count + Show Count
+        assert payload[9] == 0   # index (default)
+        assert payload[10] == 1  # content_count
+        assert payload[11] == 0  # show_count
 
     def test_start_packet_length(self):
-        """Start-Paket Payload hat immer 11 Bytes."""
+        """Start-Paket Payload hat immer 12 Bytes (CMD + CRC4 + Len4 + Idx + Count + Show)."""
         data = bytes(50)
         packet = build_start_packet(data, 2, 3)
         payload = unframe_packet(packet)
-        assert len(payload) == 11
+        assert len(payload) == 12
+
+    def test_start_packet_with_index(self):
+        """Start-Paket mit explizitem Index-Parameter."""
+        data = bytes(50)
+        packet = build_start_packet(data, content_count=1, show_count=1, index=2)
+        payload = unframe_packet(packet)
+        assert payload[9] == 2   # index
+        assert payload[10] == 1  # content_count
+        assert payload[11] == 1  # show_count
 
 
 class TestBuildDataPackets:
@@ -272,3 +290,55 @@ class TestBuildAnimationContent:
         """Speed > 255 muss korrekt als 2 Bytes enkodiert werden."""
         content = build_animation_content(bytes(10), 96, 16, speed=300)
         assert int.from_bytes(content[22:24], "big") == 300
+
+
+class TestBuildTextContentUx:
+    def test_ux_text_content_format(self):
+        """UX-TextContent: Type=0x01, Header, mode/speed/stay, moveSpace(2B), fontData."""
+        font_data = bytes([0xAA, 0xBB, 0xCC])
+        content = build_text_content_ux(
+            font_data, show_width=64, show_height=16,
+            mode=1, speed=2, stay_time=0, move_space=10,
+        )
+
+        # 4-Byte Längenprefix
+        size = int.from_bytes(content[0:4], "big")
+        assert size == len(content)
+        # Content-Typ = 0x01
+        assert content[4] == 0x01
+        # 7 Null-Bytes Padding
+        assert content[5:12] == bytes(7)
+        # layerType = 0
+        assert content[12] == 0
+        # showWidth = 64 (2B BE)
+        assert int.from_bytes(content[17:19], "big") == 64
+        # showHeight = 16 (2B BE)
+        assert int.from_bytes(content[19:21], "big") == 16
+        # mode = 1
+        assert content[21] == 1
+        # speed = 2
+        assert content[22] == 2
+        # stayTime = 0
+        assert content[23] == 0
+        # moveSpace = 10 (2B BE) — UX-spezifisches Feld
+        assert int.from_bytes(content[24:26], "big") == 10
+        # fontData direkt (kein dataLen-Prefix)
+        assert content[26:] == font_data
+
+    def test_ux_text_no_data_len_prefix(self):
+        """UX-Text hat kein 4-Byte dataLen-Prefix vor den Font-Daten."""
+        font_data = bytes(50)
+        content = build_text_content_ux(font_data, 64, 16, move_space=0)
+        # Nach moveSpace(2B) kommt direkt fontData
+        # Header(17B) + mode/speed/stay(3B) + moveSpace(2B) = 22B nach Längenprefix
+        assert content[26:] == font_data
+
+
+class TestCmdUxPlay:
+    def test_ux_play_format(self):
+        """UX Play-Kommando: [0x1A, 0x00] geframed."""
+        frame = cmd_ux_play()
+        payload = unframe_packet(frame)
+        assert payload[0] == CMD_UX_PLAY
+        assert payload[1] == 0x00
+        assert len(payload) == 2

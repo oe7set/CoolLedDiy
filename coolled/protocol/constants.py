@@ -42,6 +42,7 @@ CMD_SWITCH = 0x09        # switchStartString (Light1248) / SYNC_TIME (UX-Geräte
 CMD_BEGIN_TRANSFER = 0x0A  # beginTransferStartString
 CMD_MIRROR = 0x0C        # getSetMirror() in CoolledUXUtils.java:3958
 CMD_DEVICE_INFO = 0x1F   # getDeviceInfo() in CoolledUXUtils.java:3934
+CMD_UX_PLAY = 0x1A       # UX Start/Play-Kommando (getStartDataForProgram in CoolledUXUtils.java:3852)
 
 # Hinweis: CMD_SWITCH (0x09) wird auf Light1248-Geräten als Switch verwendet,
 # auf CoolLEDUX-Geräten als Time-Sync (getSynchronizeTime).

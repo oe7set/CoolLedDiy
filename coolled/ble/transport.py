@@ -114,6 +114,32 @@ class BleTransport(QObject):
         logger.info("Übertragung abgeschlossen")
         return True
 
+    async def send_and_wait_response(self, data: bytes, timeout: float = 3.0) -> bool:
+        """Sendet ein Paket und wartet auf BLE-Notification als Bestätigung.
+
+        Wird für UX-Geräte nach dem Start-Paket verwendet. Das Gerät sendet
+        eine Antwort bevor es bereit für Daten-Pakete ist.
+        Basiert auf ESP32-Referenzcode: sendStartPacket() + waitRX(3000).
+
+        Args:
+            data: Frame-Paket zum Senden
+            timeout: Wartezeit auf Antwort in Sekunden
+
+        Returns:
+            True wenn Paket gesendet und Antwort empfangen wurde
+        """
+        success = await self.send_packet(data)
+        if not success:
+            return False
+
+        response = await self._connection.wait_for_notification(timeout)
+        if response is None:
+            logger.warning("Keine Antwort auf Paket erhalten")
+            return False
+
+        logger.debug(f"Antwort erhalten: {response.hex()}")
+        return True
+
     def cancel_send(self) -> None:
         """Bricht eine laufende Übertragung ab."""
         self._sending = False

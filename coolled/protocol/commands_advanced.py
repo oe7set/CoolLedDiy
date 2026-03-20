@@ -21,6 +21,7 @@ from coolled.protocol.constants import (
     CMD_M_DATA,
     CMD_M_START,
     CMD_M_SWITCH,
+    CMD_UX_PLAY,
     M_CHUNK_SIZE,
 )
 from coolled.protocol.crc32 import crc32_coolled_bytes
@@ -44,18 +45,24 @@ def _xor_checksum(data: bytes) -> int:
     return result
 
 
-def build_start_packet(data: bytes, content_count: int, show_count: int) -> bytes:
+def build_start_packet(
+    data: bytes,
+    content_count: int,
+    show_count: int,
+    index: int = 0,
+) -> bytes:
     """Baut das Start-Paket für M/U/UX-Programm-Übertragung.
 
-    Entspricht getStartDataForProgram() in CoolledMUtils.java:1521-1528.
-    Wird VOR den Daten-Paketen gesendet und enthält CRC + Gesamtlänge.
+    Entspricht getStartDataForProgram() in CoolledUXUtils.java:3838-3847
+    und CoolledMUtils.java:1521-1528.
 
-    Format: [CMD_M_START] + CRC32(4B) + total_len(4B) + content_count(1B) + show_count(1B)
+    Format: [CMD_M_START] + CRC32(4B) + total_len(4B) + index(1B) + count(1B) + showCount(1B)
 
     Args:
         data: Unkomprimierte Programm-Daten (für CRC-Berechnung und Länge)
         content_count: Anzahl der Inhalte im Programm
-        show_count: Anzeige-Zähler
+        show_count: Anzeige-Zähler (UX: typisch 1, M: typisch 0)
+        index: Programm-Index (Standard 0)
 
     Returns:
         Fertiges Frame-Paket
@@ -66,7 +73,7 @@ def build_start_packet(data: bytes, content_count: int, show_count: int) -> byte
         bytes([CMD_M_START])
         + crc
         + total_len
-        + bytes([content_count & 0xFF, show_count & 0xFF])
+        + bytes([index & 0xFF, content_count & 0xFF, show_count & 0xFF])
     )
     return frame_packet(payload)
 
@@ -320,3 +327,59 @@ def cmd_switch_m(on: bool) -> bytes:
     Nutzt Kommando-Byte 0x05 statt 0x09.
     """
     return frame_packet(bytes([CMD_M_SWITCH, 0x01 if on else 0x00]))
+
+
+# --- CoolLedUX-spezifische Funktionen ---
+
+
+def build_text_content_ux(
+    font_data: bytes,
+    show_width: int,
+    show_height: int,
+    mode: int = 1,
+    speed: int = 0,
+    stay_time: int = 0,
+    move_space: int = 0,
+    layer_type: int = 0,
+    start_col: int = 0,
+    start_row: int = 0,
+) -> bytes:
+    """Baut UX-TextContentProgramContent-Struktur (Type=0x01) mit moveSpace-Feld.
+
+    Entspricht CoolledUXUtils.java:3214-3235.
+    Unterschied zu build_text_content(): zusätzliches moveSpace(2B BE) nach stayTime,
+    und Font-Daten werden direkt angehängt (kein dataLen-Prefix).
+
+    Args:
+        font_data: Rohe Font-Bitmap-Daten (aus FontReader)
+        show_width: Panel-Breite in Pixeln
+        show_height: Panel-Höhe in Pixeln
+        mode: Display-Modus
+        speed: Scroll-Geschwindigkeit
+        stay_time: Standzeit
+        move_space: Scroll-Abstand in Pixeln (UX-spezifisch)
+        layer_type: Layer-Typ (Standard 0)
+        start_col: Start-Spalte
+        start_row: Start-Zeile
+
+    Returns:
+        Content-Block mit 4-Byte-Längenprefix
+    """
+    header = _build_content_header(0x01, show_width, show_height, layer_type, start_col, start_row)
+    inner = (
+        header
+        + bytes([mode & 0xFF, speed & 0xFF, stay_time & 0xFF])
+        + int_to_2bytes_be(move_space)
+        + font_data
+    )
+    size_prefix = _int_to_4bytes_be(len(inner) + 4)
+    return size_prefix + inner
+
+
+def cmd_ux_play() -> bytes:
+    """Sendet das Play/Finalize-Kommando für UX-Geräte.
+
+    Wird nach dem letzten Daten-Paket gesendet.
+    Basiert auf ESP32-Referenzcode: sendPacket([0x1A, 0x00]).
+    """
+    return frame_packet(bytes([CMD_UX_PLAY, 0x00]))

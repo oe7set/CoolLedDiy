@@ -44,6 +44,8 @@ class BleConnection(QObject):
         self._device: BLEDevice | None = None
         self._mtu: int = BLE_WRITE_CHAR_MIN_SIZE  # Startwert, wird nach MTU-Negotiation angepasst
         self._is_connected = False
+        self._notify_event: asyncio.Event | None = None
+        self._last_notify_data: bytes = b""
 
     @property
     def is_connected(self) -> bool:
@@ -78,7 +80,35 @@ class BleConnection(QObject):
     def _on_notify(self, sender: int, data: bytearray) -> None:
         """Notify-Callback: empfängt Daten vom Gerät."""
         logger.debug(f"Notify empfangen ({len(data)} Bytes): {data.hex()}")
+        self._last_notify_data = bytes(data)
+        # Wartende Coroutine benachrichtigen (Response-Waiting)
+        if self._notify_event is not None:
+            self._notify_event.set()
         self.notify_received.emit(bytes(data))
+
+    async def wait_for_notification(self, timeout: float = 3.0) -> bytes | None:
+        """Wartet auf eine BLE-Notification vom Gerät.
+
+        Wird nach dem Start-Paket aufgerufen, um die Bestätigung des Geräts
+        abzuwarten, bevor Daten-Pakete gesendet werden.
+        Basiert auf ESP32-Referenzcode waitRX(3000) und Java DeviceManager
+        Notification-Handler.
+
+        Args:
+            timeout: Maximale Wartezeit in Sekunden (Standard 3.0)
+
+        Returns:
+            Empfangene Bytes oder None bei Timeout
+        """
+        self._notify_event = asyncio.Event()
+        try:
+            await asyncio.wait_for(self._notify_event.wait(), timeout=timeout)
+            return self._last_notify_data
+        except asyncio.TimeoutError:
+            logger.warning(f"Notification-Timeout nach {timeout}s")
+            return None
+        finally:
+            self._notify_event = None
 
     async def connect(self, device: BLEDevice) -> bool:
         """Verbindet sich mit einem CoolLed BLE-Gerät.

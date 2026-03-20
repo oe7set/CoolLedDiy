@@ -72,6 +72,11 @@ def uses_advanced_protocol(family: DeviceFamily) -> bool:
     return family in (DeviceFamily.COOLED_M, DeviceFamily.COOLED_U, DeviceFamily.COOLED_UX)
 
 
+def is_ux_family(family: DeviceFamily) -> bool:
+    """Prüft ob die Gerätefamilie CoolLedUX ist (RGB444-Pixelformat, UX-Kommandos)."""
+    return family == DeviceFamily.COOLED_UX
+
+
 def uses_begin_transfer(family: DeviceFamily) -> bool:
     """Prüft ob die Gerätefamilie begin_transfer vor Daten erwartet.
 

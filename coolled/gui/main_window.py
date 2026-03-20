@@ -48,12 +48,15 @@ from coolled.protocol.commands_advanced import (
     build_program_data,
     build_program_transfer,
     build_text_content,
+    build_text_content_ux,
     cmd_brightness_m,
     cmd_switch_m,
+    cmd_ux_play,
 )
 from coolled.protocol.constants import BEGIN_TRANSFER_DELAY_S
 from coolled.protocol.device_type import (
     DeviceFamily,
+    is_ux_family,
     uses_advanced_protocol,
     uses_begin_transfer,
 )
@@ -197,7 +200,8 @@ class MainWindow(QMainWindow):
         Protokoll-Routing nach Gerätefamilie:
         - Light1248: Direkt Text-Pakete senden (kein begin_transfer)
         - Light536: begin_transfer + 50ms Delay + Text-Pakete
-        - M/U/UX: Programm-Format (Start-Paket + LZSS-komprimierte Daten-Pakete)
+        - UX: Text als RGB444-Bild rendern → Programm-Format mit Response-Waiting
+        - M/U: Programm-Format (Start-Paket + LZSS-komprimierte Daten-Pakete)
         """
         if not self._connection.is_connected:
             self._status_bar.showMessage("Nicht verbunden!", 3000)
@@ -208,9 +212,12 @@ class MainWindow(QMainWindow):
             mode = self._text_tab.selected_mode
             speed = self._text_tab.selected_speed
 
-            if uses_advanced_protocol(self._device_family):
-                # M/U/UX: Rohe Font-Bitmap-Daten in Content-Struktur verpacken
-                # (Mode/Speed sind im Content-Header eingebettet, NICHT separat senden)
+            if is_ux_family(self._device_family):
+                # UX: Text als RGB444-Bild rendern und als Draw-Content senden
+                # (ESP32-Methode: funktioniert nachweislich)
+                success = await self._send_text_as_rgb444(text, mode, speed)
+            elif uses_advanced_protocol(self._device_family):
+                # M/U: Rohe Font-Bitmap-Daten in Content-Struktur verpacken
                 if use_font_16:
                     font_data, _ = self._font_reader.read_text_16(text)
                 else:
@@ -251,7 +258,8 @@ class MainWindow(QMainWindow):
         Protokoll-Routing:
         - Light1248: Direkt Draw-Pakete (kein begin_transfer)
         - Light536: begin_transfer + 50ms Delay + Draw-Pakete
-        - M/U/UX: Programm-Format
+        - UX: RGB444-Konvertierung → Programm-Format mit Response-Waiting
+        - M/U: Programm-Format (Monochrom-Bitmap)
         """
         if not self._connection.is_connected:
             self._status_bar.showMessage("Nicht verbunden!", 3000)
@@ -259,8 +267,15 @@ class MainWindow(QMainWindow):
 
         self._status_bar.showMessage("Sende Bild...")
         try:
-            if uses_advanced_protocol(self._device_family):
-                # M/U/UX: Bitmap in Content-Struktur verpacken
+            if is_ux_family(self._device_family):
+                # UX: Bitmap als Monochrom-Daten empfangen, zu RGB444 konvertieren
+                from coolled.image.converter import bitmap_to_image, image_to_rgb444
+                # Bitmap zurück zu PIL-Bild konvertieren, dann als RGB444
+                pil_image = bitmap_to_image(bitmap, self._panel_height, self._panel_width)
+                rgb444_data = image_to_rgb444(pil_image, self._panel_width, self._panel_height)
+                success = await self._send_ux_program(rgb444_data)
+            elif uses_advanced_protocol(self._device_family):
+                # M/U: Bitmap in Content-Struktur verpacken
                 content = build_draw_content(bitmap, self._panel_width, self._panel_height)
                 program_data = build_program_data(content)
                 start_pkt, data_pkts = build_program_transfer(program_data)
@@ -283,6 +298,86 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._status_bar.showMessage(f"Fehler: {e}", 5000)
             logger.error(f"Bild-Sende-Fehler: {e}")
+
+    async def _send_ux_program(
+        self, rgb444_data: bytes, mode: int = 1, speed: int = 1, stay_time: int = 0
+    ) -> bool:
+        """Sendet RGB444-Pixeldaten als Draw-Content an ein CoolLedUX-Gerät.
+
+        Kompletter UX-Transfer: Start-Paket (mit ACK-Waiting) → Daten-Pakete → Play-Kommando.
+        Basiert auf dem funktionierenden ESP32-Referenzcode.
+
+        Args:
+            rgb444_data: RGB444-Pixeldaten (2 Bytes pro Pixel, Column-major)
+            mode: Display-Modus (1=Statisch)
+            speed: Scroll-Geschwindigkeit
+            stay_time: Standzeit
+
+        Returns:
+            True bei Erfolg
+        """
+        content = build_draw_content(
+            rgb444_data, self._panel_width, self._panel_height, mode, speed, stay_time,
+        )
+        program_data = build_program_data(content, content_count=1, show_count=0)
+        start_pkt, data_pkts = build_program_transfer(
+            program_data, content_count=1, show_count=1,
+        )
+
+        # Start-Paket senden und auf Bestätigung warten
+        if not await self._transport.send_and_wait_response(start_pkt, timeout=3.0):
+            logger.warning("UX: Keine Antwort auf Start-Paket, sende trotzdem weiter")
+
+        # Komprimierte Daten-Pakete senden
+        success = await self._transport.send_packets(data_pkts)
+        if not success:
+            return False
+
+        # Play-Kommando senden (finalisiert den Transfer)
+        await asyncio.sleep(0.1)
+        await self._transport.send_packet(cmd_ux_play())
+        return True
+
+    async def _send_text_as_rgb444(self, text: str, mode: int, speed: int) -> bool:
+        """Rendert Text als RGB444-Bild und sendet es an ein CoolLedUX-Gerät.
+
+        ESP32-Methode: Text lokal als weißes Bild rendern, zu RGB444 konvertieren,
+        als Draw-Content senden. Funktioniert nachweislich.
+
+        Args:
+            text: Zu sendender Text
+            mode: Display-Modus
+            speed: Scroll-Geschwindigkeit
+
+        Returns:
+            True bei Erfolg
+        """
+        from PIL import Image, ImageDraw, ImageFont
+        from coolled.image.converter import image_to_rgb444
+
+        w, h = self._panel_width, self._panel_height
+
+        # Text mit PIL rendern (weiß auf schwarz)
+        img = Image.new("RGB", (w, h), (0, 0, 0))
+        draw = ImageDraw.Draw(img)
+
+        # Eingebauten Font verwenden, passend zur Panel-Höhe
+        try:
+            font = ImageFont.truetype("arial.ttf", max(8, h - 4))
+        except OSError:
+            font = ImageFont.load_default()
+
+        # Text zentrieren
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+        x = max(0, (w - text_w) // 2)
+        y = max(0, (h - text_h) // 2) - bbox[1]
+        draw.text((x, y), text, fill=(255, 255, 255), font=font)
+
+        # Zu RGB444 konvertieren und senden
+        rgb444_data = image_to_rgb444(img, w, h)
+        return await self._send_ux_program(rgb444_data, mode, speed)
 
     @asyncSlot(list, int)
     async def _on_send_animation(self, frames: list, speed: int) -> None:
